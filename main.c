@@ -4,8 +4,9 @@
 #include <stdio.h>
 #include <string.h>
 #include <arpa/inet.h>
-
 #include <SDL2/SDL.h>
+
+#include "./stack.h"
 
 #define DISPLAY_WIDTH 64
 #define DISPLAY_HEIGHT 32
@@ -109,7 +110,13 @@ int main() {
     // Stack
     // Will be used to store 12bit addresses
     // Probably enough with 16
-    short stack[16];
+    
+    struct Stack stack;
+    stack.len = STACK_SIZE;
+    stack.elements = 0;
+    stack.stack = malloc(sizeof(short) * STACK_SIZE);
+
+
     load_rom("./ibm.ch8", memory);
 	
 	
@@ -240,6 +247,8 @@ int main() {
 		//SDL_RenderPresent(renderer);
 	}
 
+
+    free(stack.stack);
 	SDL_Delay(10);
 
 	// Clean up SDL
