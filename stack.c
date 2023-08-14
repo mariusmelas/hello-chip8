@@ -15,10 +15,12 @@ void push_stack(struct Stack *stack, char value) {
     }
 }
 
-void pop_stack(struct Stack *stack) {
-    if((*stack).elements > 0) {        
+short pop_stack(struct Stack *stack) {
+    if((*stack).elements > 0) {  
+        short element = (*stack).stack[(*stack).elements - 1];      
         (*stack).stack[(*stack).elements -1] = 0;
         (*stack).elements--;
+        return element;
     } else {
         printf("Stack is empty\n");
         exit(-1);
