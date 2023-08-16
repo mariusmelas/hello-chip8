@@ -5,7 +5,7 @@
 
 
 
-void push_stack(struct Stack *stack, char value) {
+void push_stack(struct Stack *stack, int value) {
     if((*stack).elements < (*stack).len) {
         (*stack).stack[(*stack).elements++] = value;
     } else {
@@ -15,9 +15,9 @@ void push_stack(struct Stack *stack, char value) {
     }
 }
 
-short pop_stack(struct Stack *stack) {
+int pop_stack(struct Stack *stack) {
     if((*stack).elements > 0) {  
-        short element = (*stack).stack[(*stack).elements - 1];      
+        int element = (*stack).stack[(*stack).elements - 1];      
         (*stack).stack[(*stack).elements -1] = 0;
         (*stack).elements--;
         return element;

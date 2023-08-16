@@ -6,11 +6,14 @@
 #include <time.h>
 #include <arpa/inet.h>
 #include <SDL2/SDL.h>
+#include <stdbool.h>
 
 #include "./stack.h"
 
 #define DISPLAY_WIDTH 64
 #define DISPLAY_HEIGHT 32
+
+#define DEBUG_MODE true
 
 /*
     Using one struct for all instructions.
@@ -95,6 +98,9 @@ void load_rom(char *pathname, char *memory) {
     fclose(rom);
 }
 
+unsigned char vx_temp;
+unsigned char vy_temp;
+
 int main() {
 	printf("Hello chip-8 :)\n");
 
@@ -148,7 +154,7 @@ int main() {
     struct Stack stack;
     stack.len = STACK_SIZE;
     stack.elements = 0;
-    stack.stack = malloc(sizeof(short) * STACK_SIZE);
+    stack.stack = malloc(sizeof(int) * STACK_SIZE);
 
     // Keypad
     // Will be set to 1 on key down, and 0 on key up.
@@ -164,8 +170,10 @@ int main() {
 
     const Uint8* keyboard;
 
-    load_rom("./ibm.ch8", memory);
-	
+    load_rom("./roms/6-keypad.ch8", memory);
+
+
+   
 	// Set up SDL
 	SDL_Window *window;
 	SDL_Renderer *renderer;
@@ -243,11 +251,39 @@ int main() {
             }           
         }   
 
-
-		// Fetch next expression
+        // Fetch next expression
         struct opcode opcode = fetch_instruction(&PC, memory);
-        // Decode and execute instructions
+    
+        // If debug mode and current PC is breakpoint, wait for stepforward.
+
+        if(DEBUG_MODE) {
+            // Print current instruction, and options for what to do next.
+            printf("PC=%d\n", PC);
+            printf("opcode: %x\n", opcode.opcode);
+            printf("Press enter to step forward\n");
+            unsigned char c;
+            while(!isspace((c = getchar()))) {
+                // Consume newline
+                getchar();
+                switch(c) {
+                    case 'a':
+                        // Print registers
+                        printf("Registers V0 - VF:\n");
+                        printf("---------------------\n");
+                        for(int i = 0; i < sizeof(registers) / sizeof(registers[0]); i++) {
+                            printf("V%1x: %x (Decimal: %d)\n", i, registers[i], registers[i]);
+                        }
+                        printf("---------------------\n");
+                        break;
+                    default: 
+                        break;
+                }
+
+            }
+            
+        }
   
+        // Decode and execute instructions
         switch(opcode.first) {
             case 0x00:
                 // 0NNN	Call - Calls machine code routine (RCA 1802 for COSMAC VIP) at address NNN. Not necessary for most ROMs.
@@ -265,6 +301,8 @@ int main() {
 						break;
 					default:
 						printf("%x is not a valid instructon at PC=%d\n",opcode.opcode, PC);
+                        //break;
+                        //continue;
 						exit(-1);
 				}
 				break;
@@ -277,7 +315,7 @@ int main() {
             case 0x2:
                 // 2NNN	Flow	*(0xNNN)()	Calls subroutine at NNN.
                 // Push next PC to stack.
-                push_stack(&stack, PC+2);
+                push_stack(&stack, PC);
                 PC = opcode.NNN;
                 break;
             case 0x3:
@@ -309,74 +347,93 @@ int main() {
                 // 6XNN	Const	Vx = NN	Sets VX to NN.
                 registers[opcode.X] = opcode.NN;
                 break;
-            case 0x7:
+            case 0x7:     
                 // 7XNN	Const	Vx += NN	Adds NN to VX (carry flag is not changed).
                 registers[opcode.X] += opcode.NN;
                 break;
             case 0x8:
-
-
                 switch(opcode.N) {
-                    case 0:
+                    case 0x0:
                         // 8XY0	Assig	Vx = Vy	Sets VX to the value of VY.
                         registers[opcode.X] = registers[opcode.Y];
                         break;
-                    case 1:
+                    case 0x1:
                         // 8XY1	BitOp	Vx |= Vy	Sets VX to VX or VY. (bitwise OR operation)
                         registers[opcode.X] = registers[opcode.X] | registers[opcode.Y];
-                    case 2:
+                        break;
+                    case 0x2:
                         // 8XY2	BitOp	Vx &= Vy	Sets VX to VX and VY. (bitwise AND operation)
-                        registers[opcode.X] = registers[opcode.X] & registers[opcode.Y];
-                    case 3:
+                        registers[opcode.X] &= registers[opcode.Y];
+                        break;
+                    case 0x3:
                         // 8XY3[a]	BitOp	Vx ^= Vy	Sets VX to VX xor VY.
-                        registers[opcode.X] =  registers[opcode.X] ^  registers[opcode.Y];
-                    case 4:
+                        registers[opcode.X] ^= registers[opcode.Y];
+                        break;
+                    case 0x4:
 
                         // 8XY4	Math	Vx += Vy	Adds VY to VX. 
                         // VF is set to 1 when there's a carry, and to 0 when there is not.
-                        registers[opcode.X] =  registers[opcode.X] +  registers[opcode.Y];
+
+                        // Vf cannot be used as Vx or Vy 
+                        vx_temp = registers[opcode.X];
+                        vy_temp = registers[opcode.Y];
+                        registers[opcode.X] +=  registers[opcode.Y];
 
                         // Check if there was a carry
-                        if(registers[opcode.X] +  registers[opcode.Y] >= 0xF) {
+                        if(vx_temp + vy_temp > 0xFF) {
                             registers[0xF] = 1;
                         } else {
                             registers[0xF] = 0;
                         }
 
                         break;
-                    case 5:
+                    case 0x5:
                         // VY is subtracted from VX. VF is set to 0 when there's a borrow, and 1 when there is not.
 
+                        vx_temp = registers[opcode.X];
+                        vy_temp = registers[opcode.Y];
+                        //unsigned char result = registers[opcode.X] - registers[opcode.Y];
                         registers[opcode.X] =  registers[opcode.X] - registers[opcode.Y];
 
-                        if(registers[opcode.X] < registers[opcode.Y]) {
-                            registers[0xF] = 1;
-                        } else {
+                        if(vx_temp < vy_temp) {
                             registers[0xF] = 0;
+                        } else {
+                            registers[0xF] = 1;
                         }
+
                         break;
-                    case 6:
+                    case 0x6:
                         // 8XY6[a]	BitOp	Vx >>= 1	
                         // Stores the least significant bit of VX in VF and then shifts VX to the right by 1.
                         // vx = 11110111
-                        registers[0xF] = registers[opcode.X] & 0x1;
+                        vx_temp = registers[opcode.X];
                         registers[opcode.X] = registers[opcode.X] >> 1;
+                        registers[0xF] = vx_temp & 0x1;
+
                         break;
-                    case 7:
+                    case 0x7:
                         // 8XY7[a]	Math	Vx = Vy - Vx	Sets VX to VY minus VX. 
                         // VF is set to 0 when there's a borrow, and 1 when there is not.
+
+                        vx_temp = registers[opcode.X];
+                        vy_temp = registers[opcode.Y];
+
                         registers[opcode.X] =  registers[opcode.Y] - registers[opcode.X]; 
-                        if(registers[opcode.Y] < registers[opcode.X]) {
+
+                        if(vy_temp < vx_temp) {
                             registers[0xF] = 0;
                         } else {
                             registers[0xF] = 1;
                         }
+
                         break;
                     case 0xE:
                         // 8XYE[a]	BitOp	Vx <<= 1	
                         // Stores the most significant bit of VX in VF and then shifts VX to the left by 1.[b]
-                        registers[0xF] = registers[opcode.X] & 0x80;
+                        vx_temp = registers[opcode.X];
                         registers[opcode.X] = registers[opcode.X] << 1;
+                        registers[0xF] = (vx_temp & 0x80) >> 7; 
+
                         break;
                  }
 
@@ -392,7 +449,6 @@ int main() {
 
             case 0xa:
                 //ANNN	MEM	I = NNN	Sets I to the address NNN.
-				printf("update I\n");
                 I = opcode.NNN;
 				break;
 
@@ -422,13 +478,24 @@ int main() {
                     char sprite_byte = memory[pixel_address + row];
                     for (int col = 0; col < width; col++) {
                         int pixelValue = (sprite_byte >> (7 - col)) & 0x1;
-                        int x = (col + vx) % DISPLAY_WIDTH;
-                        int y = (row + vy) % DISPLAY_HEIGHT;
-    
-                        if (pixelValue && display[x][y]) {
+                        
+                        // int x = (col + vx) % DISPLAY_WIDTH;
+                        // int y = (row + vy) % DISPLAY_HEIGHT;
+                        int x = (col + vx);
+                        int y = (row + vy);
+
+                        if(x >= 0 && x <= DISPLAY_WIDTH && y >= 0 && y <= DISPLAY_HEIGHT) {
+
+                            if (pixelValue && display[x][y]) {
                                 registers[0xF] = 1;
+                            }
+                            display[x][y] ^= pixelValue;
+                            
                         }
-                        display[x][y] ^= pixelValue;
+
+
+
+                        
                     }
                 }
 
@@ -461,94 +528,102 @@ int main() {
                             PC += 2;
                         }
                         break;
-                    
-                    case 0xF:
-                        switch (opcode.NN)
-                        {
-                        case 0x07:
-                            // FX07	Timer	Vx = get_delay()	Sets VX to the value of the delay timer.
-                            registers[opcode.X] = registers[delay_timer];
-                            break;
-                        case 0x0A:
-                            // FX0A	KeyOp	Vx = get_key()	A key press is awaited, and then stored in VX 
-                            // (blocking operation, all instruction halted until next key event).
-
-                            short key_pressed = -1;
-
-                            // For now just set it to first pressed key it finds.
-                            // Should probably handle multiple key presses.
-
-                            for(short i = 0; i < 16; i++) {
-                                if(keypad[i]) {
-                                    key_pressed = i;
-                                }
-                            }
-                            
-                            // If there was no key press, decrement the PC and break
-                            if(key_pressed == -1) {
-                                PC -= 2;
-                                break;
-                            }
-
-                            // If there was a key press, store it in VX.
-                
-                            registers[opcode.X] = keypad_values[key_pressed];
-                            break;
-                        case 0x15:
-                            //FX15	Timer	delay_timer(Vx)	Sets the delay timer to VX.
-                            delay_timer = opcode.X;
-                            break;
-                        case 0x18:
-                            //FX18	Sound	sound_timer(Vx)	Sets the sound timer to VX.
-                            sound_timer = opcode.X;
-                            break;
-                        case 0x1E:
-                            // FX1E	MEM	I += Vx	Adds VX to I. VF is not affected.
-                            I += opcode.X;
-                            break;
-                        case 0x29:
-                            // FX29	MEM	I = sprite_addr[Vx]	Sets I to the location of 
-                            // the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font.
-                            
-                            // The font is stored from memory address 0x50
-                            I = 0x50 + 4 * registers[opcode.X];
-                            break;
-                        case 0x33:
-                            // FX33	BCD	
-                            // Stores the binary-coded decimal representation of VX, with the hundreds digit in memory at location in I, 
-                            // the tens digit at location I+1, and the ones digit at location I+2.
-                            
-                            memory[I] = registers[opcode.X] / 100 % 10;
-                            memory[I + 1] = registers[opcode.X] / 10 % 10;
-                            memory[I + 2] = registers[opcode.X] % 10;
-
-                            break;
-                        case 0x55:
-                            // FX55	MEM	reg_dump(Vx, &I)	Stores from V0 to VX (including VX) in memory, starting at address I. 
-                            // The offset from I is increased by 1 for each value written, but I itself is left unmodified.
-
-                            for(int i = registers[0], offset = 0; i <= registers[opcode.X]; i++, offset++) {
-                                memory[I+offset] = registers[i];
-
-                            }
-                        case 0x65:
-                            // FX65	MEM	reg_load(Vx, &I)	Fills from V0 to VX (including VX) with values from memory, starting at address I. 
-                            // The offset from I is increased by 1 for each value read, but I itself is left unmodified.
-                            for(int i = registers[0], offset = 0; i <= registers[opcode.X]; i++, offset++) {
-                                registers[i] =  memory[I+offset];
-
-                            }
-
-                            break;
-                        default:
-                            break;
-                        }
+                    default: 
                         break;
                 }
                 break;
-			default:		
-				printf("%x is not a valid instructon at PC=%d\n",opcode.opcode, PC);
-				exit(-1);
+            case 0xF:
+                switch (opcode.NN)
+                {
+                case 0x07:
+                    // FX07	Timer	Vx = get_delay()	Sets VX to the value of the delay timer.
+                    registers[opcode.X] = registers[delay_timer];
+                    break;
+                case 0x0A:
+                    // FX0A	KeyOp	Vx = get_key()	A key press is awaited, and then stored in VX 
+                    // (blocking operation, all instruction halted until next key event).
+
+                    short key_pressed = -1;
+
+                    // For now just set it to first pressed key it finds.
+                    // Should probably handle multiple key presses.
+
+                    for(short i = 0; i < 16; i++) {
+                        if(keypad[i]) {
+                            key_pressed = i;
+                        }
+                    }
+                    
+                    // If there was no key press, decrement the PC and break
+                    if(key_pressed == -1) {
+                        PC -= 2;
+                        break;
+                    }
+
+                    // If there was a key press, store it in VX.
+        
+                    registers[opcode.X] = keypad_values[key_pressed];
+                    break;
+                case 0x15:
+                    //FX15	Timer	delay_timer(Vx)	Sets the delay timer to VX.
+                    delay_timer = opcode.X;
+                    break;
+                case 0x18:
+                    //FX18	Sound	sound_timer(Vx)	Sets the sound timer to VX.
+                    sound_timer = opcode.X;
+                    break;
+                case 0x1E:
+                    // FX1E	MEM	I += Vx	Adds VX to I. VF is not affected.
+                    I += registers[opcode.X];
+                    break;
+                case 0x29:
+                    // FX29	MEM	I = sprite_addr[Vx]	Sets I to the location of 
+                    // the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font.
+                    
+                    // The font is stored from memory address 0x50
+                    I = 0x50 + 4 * registers[opcode.X];
+                    break;
+                case 0x33:
+                    // FX33	BCD	
+                    // Stores the binary-coded decimal representation of VX, with the hundreds digit in memory at location in I, 
+                    // the tens digit at location I+1, and the ones digit at location I+2.
+                    
+                    memory[I] = registers[opcode.X] / 100 % 10;
+                    memory[I + 1] = registers[opcode.X] / 10 % 10;
+                    memory[I + 2] = registers[opcode.X] % 10;
+
+                    break;
+                case 0x55:
+                    // FX55	MEM	reg_dump(Vx, &I)	Stores from V0 to VX (including VX) in memory, starting at address I. 
+                    // The offset from I is increased by 1 for each value written, but I itself is left unmodified.
+
+                    for(int i = 0, offset = 0; i <= opcode.X; i++, offset++) {
+                        memory[I+offset] = registers[i];
+
+                    }
+                    break;
+                case 0x65:
+                    // FX65	MEM	reg_load(Vx, &I)	Fills from V0 to VX (including VX) with values from memory, starting at address I. 
+                    // The offset from I is increased by 1 for each value read, but I itself is left unmodified.
+                    for(int i = 0, offset = 0; i <= opcode.X; i++, offset++) {
+                        registers[i] =  memory[I+offset];
+
+                    }
+                    break;
+
+                default:
+                    break;
+
+
+                break;
+            }
+
+            break;
+
+        default:		
+            printf(" - %x is not a valid instructon at PC=%d\n",opcode.opcode, PC);
+            continue;
+            //exit(-1);
         }
 		
 
@@ -574,14 +649,14 @@ int main() {
 		double seconds = (double) (ticks - prev_getticks) / 1000.0;
 			
 		// Wait until 1/60 seconds
-		while(seconds < 1 / 60) {
+		while(seconds < 1.0 / 60.0) {
 			ticks = SDL_GetTicks64();
 			seconds = (double) (ticks - prev_getticks) / 1000.0;
 		}
 		
 		prev_getticks = ticks;
 
-		//SDL_RenderPresent(renderer);
+		SDL_RenderPresent(renderer);
 	}
 
 
