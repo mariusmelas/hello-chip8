@@ -13,7 +13,7 @@
 #define DISPLAY_WIDTH 64
 #define DISPLAY_HEIGHT 32
 
-#define DEBUG_MODE true
+#define DEBUG_MODE false
 
 /*
     Using one struct for all instructions.
@@ -170,7 +170,7 @@ int main() {
 
     const Uint8* keyboard;
 
-    load_rom("./roms/6-keypad.ch8", memory);
+    load_rom("./roms/keypad_test_hap_2006.ch8", memory);
 
 
    
@@ -581,7 +581,8 @@ int main() {
                     // the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font.
                     
                     // The font is stored from memory address 0x50
-                    I = 0x50 + 4 * registers[opcode.X];
+                    printf("Set I to character: %x\n", registers[opcode.X]);
+                    I = 0x50 + 5 * registers[opcode.X];
                     break;
                 case 0x33:
                     // FX33	BCD	
