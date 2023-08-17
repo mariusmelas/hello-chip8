@@ -14,6 +14,8 @@
 #define DISPLAY_HEIGHT 32
 
 #define DEBUG_MODE false
+#define COSMAC_VIP false
+
 
 /*
     Using one struct for all instructions.
@@ -63,11 +65,13 @@ void draw_display(SDL_Renderer *renderer, unsigned char display[DISPLAY_WIDTH][D
     // Clear the renderer before drawing the updated display
     SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
     SDL_RenderClear(renderer);
+    //SDL_RenderPresent(renderer);
+
 
     // Draw the updated display
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
-    for (int y = 0; y < DISPLAY_HEIGHT; y++) {
-        for (int x = 0; x < DISPLAY_WIDTH; x++) {
+    for (int x = 0; x < DISPLAY_WIDTH; x++) {
+        for (int y = 0; y < DISPLAY_HEIGHT; y++) {
             if (display[x][y]) {
                 SDL_Rect pixelRect = {x * PIXEL_SIZE, y * PIXEL_SIZE, PIXEL_SIZE, PIXEL_SIZE};
                 SDL_RenderFillRect(renderer, &pixelRect);
@@ -145,8 +149,8 @@ int main() {
 
     // Delay and sound timer
     // Will be set to a register.
-    short delay_timer = -1;
-    short sound_timer = -1;
+    short delay_timer = 0;
+    short sound_timer = 0;
 
     // Stack
     // Will be used to store 12bit addresses
@@ -170,14 +174,11 @@ int main() {
 
     const Uint8* keyboard;
 
-    load_rom("./roms/keypad_test_hap_2006.ch8", memory);
-
-
+    load_rom("./roms/pong1pl.ch8", memory);
    
 	// Set up SDL
 	SDL_Window *window;
 	SDL_Renderer *renderer;
-
 	if(SDL_Init(SDL_INIT_VIDEO) < 0) {
 		printf("Error initializing SDL\n");
 		return -1;
@@ -190,13 +191,7 @@ int main() {
 	}
 
 	
-    //SDL_SetRenderDrawColor(renderer, 255,255,255,255);
-	//SDL_RenderClear(renderer);
-    //SDL_RenderPresent(renderer);	
-	// Set up timer
 	Uint64 prev_getticks = 0;
-
-
 
     int run_program  = 1;
 	while(run_program) {
@@ -290,9 +285,7 @@ int main() {
 				switch(opcode.NN) {
 					case 0xE0:
                 		//00E0	Display	disp_clear()	Clears the screen.
-    					SDL_SetRenderDrawColor(renderer, 1,1,1,1);
-						SDL_RenderClear(renderer);
-						SDL_RenderPresent(renderer);
+                        memset(display,0x00, DISPLAY_WIDTH * DISPLAY_HEIGHT);
 						break;
 					case 0xEE:		
                 		//00EE	Flow	return;	Returns from a subroutine.
@@ -301,16 +294,12 @@ int main() {
 						break;
 					default:
 						printf("%x is not a valid instructon at PC=%d\n",opcode.opcode, PC);
-                        //break;
-                        //continue;
 						exit(-1);
 				}
 				break;
             case 0x1:
                 // 1NNN	Flow	goto NNN;	Jumps to address NNN.
                 PC = opcode.NNN;
-				//printf("opcode.NNN = %x\n",opcode.NNN);
-				//printf("memory: %x %x\n", memory[opcode.NNN], memory[opcode.NNN +1] );
                 break;
             case 0x2:
                 // 2NNN	Flow	*(0xNNN)()	Calls subroutine at NNN.
@@ -326,7 +315,7 @@ int main() {
                 }
                 break;
             case 0x4:
-                //4XNN	Cond	if (Vx != NN)	Skips the next instruction if VX does not equal NN (usually the next instruction is a jump to skip a code block).
+                //4XNN	Cond	.chif (Vx != NN)	Skips the next instruction if VX does not equal NN (usually the next instruction is a jump to skip a code block).
                 if(registers[opcode.X] != opcode.NN) {
                     PC += 2;
                 }
@@ -360,14 +349,27 @@ int main() {
                     case 0x1:
                         // 8XY1	BitOp	Vx |= Vy	Sets VX to VX or VY. (bitwise OR operation)
                         registers[opcode.X] = registers[opcode.X] | registers[opcode.Y];
+
+                        if(COSMAC_VIP) {
+                            // Reset the flag register
+                            registers[0xF] = 0;
+                        }
                         break;
                     case 0x2:
                         // 8XY2	BitOp	Vx &= Vy	Sets VX to VX and VY. (bitwise AND operation)
                         registers[opcode.X] &= registers[opcode.Y];
+                        if(COSMAC_VIP) {
+                            // Reset the flag register
+                            registers[0xF] = 0;
+                        }
                         break;
                     case 0x3:
                         // 8XY3[a]	BitOp	Vx ^= Vy	Sets VX to VX xor VY.
                         registers[opcode.X] ^= registers[opcode.Y];
+                        if(COSMAC_VIP) {
+                            // Reset the flag register
+                            registers[0xF] = 0;
+                        }
                         break;
                     case 0x4:
 
@@ -403,12 +405,21 @@ int main() {
 
                         break;
                     case 0x6:
-                        // 8XY6[a]	BitOp	Vx >>= 1	
-                        // Stores the least significant bit of VX in VF and then shifts VX to the right by 1.
-                        // vx = 11110111
+
+                        // Ambigious instruction!!
+                        
+                        if(COSMAC_VIP) {
+                            // For the original COSMAC VIP:
+                            // Vy is stored in Vx, and Vx is shiftet to right by 1.
+                            registers[opcode.X] = registers[opcode.Y];
+                        } 
+                        
+                        // SCHIP: shifts the vx in place
                         vx_temp = registers[opcode.X];
                         registers[opcode.X] = registers[opcode.X] >> 1;
+                        // Both: Stores the least significant bit of vx in vf
                         registers[0xF] = vx_temp & 0x1;
+
 
                         break;
                     case 0x7:
@@ -428,6 +439,14 @@ int main() {
 
                         break;
                     case 0xE:
+
+                        // Ambiguous instruction
+                        if(COSMAC_VIP) {
+                            // For the original COSMAC VIP:
+                            // Vy is stored in Vx, and Vx is shiftet to left by 1.
+                            registers[opcode.X] = registers[opcode.Y];
+                        } 
+                        
                         // 8XYE[a]	BitOp	Vx <<= 1	
                         // Stores the most significant bit of VX in VF and then shifts VX to the left by 1.[b]
                         vx_temp = registers[opcode.X];
@@ -462,43 +481,42 @@ int main() {
                 srand(time(NULL));
                 short r = rand() % 256;
                 registers[opcode.X] = r & opcode.NN;
+                break;
 
             case 0xD:
                 
-                short pixel_size = 10;
                 short vx = registers[opcode.X] % 64;
                 short vy = registers[opcode.Y] % 32;
                 short width = 8;
                 short height = opcode.N;
                 int pixel_address = I;
                 
-                SDL_SetRenderDrawColor(renderer, 255,255,255,255);
-                SDL_Rect pixel;
+                //SDL_SetRenderDrawColor(renderer, 255,255,255,255);
+
+                registers[0xF] = 0;
                 for (int row = 0; row < height; row++) {
                     char sprite_byte = memory[pixel_address + row];
                     for (int col = 0; col < width; col++) {
                         int pixelValue = (sprite_byte >> (7 - col)) & 0x1;
                         
-                        // int x = (col + vx) % DISPLAY_WIDTH;
-                        // int y = (row + vy) % DISPLAY_HEIGHT;
+                        //int x = (col + vx) % DISPLAY_WIDTH;
+                        //int y = (row + vy) % DISPLAY_HEIGHT;
                         int x = (col + vx);
                         int y = (row + vy);
 
                         if(x >= 0 && x <= DISPLAY_WIDTH && y >= 0 && y <= DISPLAY_HEIGHT) {
 
-                            if (pixelValue && display[x][y]) {
-                                registers[0xF] = 1;
+                            if (pixelValue) {
+                                if(display[x][y]) {
+                                    registers[0xF] = 1;
+                                }
+                                display[x][y] ^= 1;
                             }
-                            display[x][y] ^= pixelValue;
                             
                         }
-
-
-
                         
                     }
                 }
-
                 draw_display(renderer, display);
         
                 break;
@@ -513,7 +531,8 @@ int main() {
 
                         // Get the keypad index of the key stored in vx from keypad_indexes.
                         // If it is pressed, the key will be set to 1 in keypad[]
-                        if(keypad[keypad_indexes[opcode.X]]) {
+                        if(keypad[keypad_indexes[registers[opcode.X]]]) {
+                            //printf("key is pressed");
                             PC += 2;
                         }
                         break;
@@ -524,7 +543,7 @@ int main() {
                         
                         // Get the keypad index of the key stored in vx from keypad_indexes.
                         // If it is not pressed, the key will be set to 0 in keypad[]
-                        if(!keypad[keypad_indexes[opcode.X]]) {
+                        if(!keypad[keypad_indexes[registers[opcode.X]]]) {
                             PC += 2;
                         }
                         break;
@@ -537,7 +556,7 @@ int main() {
                 {
                 case 0x07:
                     // FX07	Timer	Vx = get_delay()	Sets VX to the value of the delay timer.
-                    registers[opcode.X] = registers[delay_timer];
+                    registers[opcode.X] = delay_timer;
                     break;
                 case 0x0A:
                     // FX0A	KeyOp	Vx = get_key()	A key press is awaited, and then stored in VX 
@@ -566,11 +585,11 @@ int main() {
                     break;
                 case 0x15:
                     //FX15	Timer	delay_timer(Vx)	Sets the delay timer to VX.
-                    delay_timer = opcode.X;
+                    delay_timer = registers[opcode.X];
                     break;
                 case 0x18:
                     //FX18	Sound	sound_timer(Vx)	Sets the sound timer to VX.
-                    sound_timer = opcode.X;
+                    sound_timer = registers[opcode.X];
                     break;
                 case 0x1E:
                     // FX1E	MEM	I += Vx	Adds VX to I. VF is not affected.
@@ -581,7 +600,6 @@ int main() {
                     // the sprite for the character in VX. Characters 0-F (in hexadecimal) are represented by a 4x5 font.
                     
                     // The font is stored from memory address 0x50
-                    printf("Set I to character: %x\n", registers[opcode.X]);
                     I = 0x50 + 5 * registers[opcode.X];
                     break;
                 case 0x33:
@@ -602,6 +620,10 @@ int main() {
                         memory[I+offset] = registers[i];
 
                     }
+
+                    if(COSMAC_VIP) {
+                        I += opcode.X + 1;
+                    }
                     break;
                 case 0x65:
                     // FX65	MEM	reg_load(Vx, &I)	Fills from V0 to VX (including VX) with values from memory, starting at address I. 
@@ -609,6 +631,10 @@ int main() {
                     for(int i = 0, offset = 0; i <= opcode.X; i++, offset++) {
                         registers[i] =  memory[I+offset];
 
+                    }
+
+                    if(COSMAC_VIP) {
+                        I += opcode.X +1;
                     }
                     break;
 
@@ -627,37 +653,36 @@ int main() {
             //exit(-1);
         }
 		
-
-        // Check if delay if sound timer is set ( might be unnecessary )
     
         // Delay timer
-        if(delay_timer >= 0) {
             // Count down timer if its larger than zero.
-            if(registers[delay_timer] > 0)
-                registers[delay_timer] -= 1;
+        if(delay_timer > 0) {
+            delay_timer -= 1;
+
         }
+        
 
         // Sound timer
         // Should also play a beep
-        if(sound_timer  >= 0) {
         // Count down timer if its larger than zero.
-            if(registers[sound_timer] > 0)
-                registers[sound_timer] -= 1;
-        }
+        if(sound_timer > 0) {
+            sound_timer -= 1;
 
+        }
+    
 
 		Uint64 ticks = SDL_GetTicks64();
-		double seconds = (double) (ticks - prev_getticks) / 1000.0;
+		double seconds = ((double) (ticks - prev_getticks)) / 1000.0;
 			
 		// Wait until 1/60 seconds
-		while(seconds < 1.0 / 60.0) {
+		while(seconds < 1.0 / (60.0 * 10.0)) {
 			ticks = SDL_GetTicks64();
 			seconds = (double) (ticks - prev_getticks) / 1000.0;
 		}
 		
 		prev_getticks = ticks;
 
-		SDL_RenderPresent(renderer);
+		draw_display(renderer, display);
 	}
 
 
@@ -667,7 +692,7 @@ int main() {
 	// Clean up SDL
 	SDL_DestroyRenderer(renderer);
 	SDL_DestroyWindow(window);
-	SDL_Quit;
+	SDL_Quit();
 
 
 	return 0;
